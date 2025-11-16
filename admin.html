@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin - Manage Products</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f8f8f8;
+    }
+    h1, h2 {
+      color: #333;
+    }
+    input, select, button {
+      padding: 8px;
+      margin-bottom: 10px;
+      width: 250px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    button {
+      background: #ff6600;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    button:hover {
+      background: #e65c00;
+    }
+    #product-list {
+      margin-top: 20px;
+    }
+    .product-card {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 10px;
+      margin: 10px;
+      width: 250px;
+      display: inline-block;
+      vertical-align: top;
+      text-align: center;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      background: white;
+    }
+    .product-card img {
+      width: 100%;
+      height: 150px;
+      object-fit: cover;
+      border-radius: 6px;
+    }
+    #login-section {
+      margin-top: 50px;
+      text-align: center;
+    }
+    #admin-panel {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>Admin Dashboard</h1>
+
+  <!-- Admin Login -->
+  <div id="login-section">
+    <h2>Login to Continue</h2>
+    <input type="password" id="admin-pass" placeholder="Enter Admin Password">
+    <br>
+    <button onclick="checkPassword()">Login</button>
+  </div>
+
+  <!-- Admin Panel -->
+  <div id="admin-panel">
+    <h2>Add New Product</h2>
+    <form id="product-form">
+      <input type="text" id="name" placeholder="Product Name" required><br>
+      <input type="number" id="price" placeholder="Price (₦)" required><br>
+
+      <label>Upload Product Image:</label><br>
+      <input type="file" id="imageFile" accept="image/*" required><br>
+
+      <select id="category" required>
+        <option value="">Select Category</option>
+        <option value="Fashion">Fashion</option>
+        <option value="Electronics">Electronics</option>
+        <option value="Beauty">Beauty</option>
+        <option value="Home">Home</option>
+        <option value="Others">Others</option>
+      </select><br>
+
+      <input type="text" id="custom-category" placeholder="Or type a new category"><br>
+      <button type="submit">Add Product</button>
+    </form>
+
+    <h2>Manage Products</h2>
+    <div id="product-list"></div>
+  </div>
+
+ <script>
+    const ADMIN_PASSWORD = "mySecret123"; 
+
+    function checkPassword() {
+      const entered = document.getElementById("admin-pass").value;
+      if (entered === ADMIN_PASSWORD) {
+        document.getElementById("login-section").style.display = "none";
+        document.getElementById("admin-panel").style.display = "block";
+        loadProducts();
+      } else {
+        alert("❌ Wrong password!");
+      }
+    }
+
+    // Load all products from the Vercel API Route
+    async function loadProducts() {
+      const productList = document.getElementById("product-list");
+      productList.innerHTML = "Loading products...";
+      
+      try {
+        const response = await fetch("/api/products");
+        if (!response.ok) throw new Error("Failed to fetch products");
+        const products = await response.json(); 
+        
+        productList.innerHTML = ""; 
+
+        products.forEach((p) => {
+          const div = document.createElement("div");
+          div.className = "product-card";
+          div.innerHTML = `
+            <img src="${p.image_url}" alt="${p.name}">
+            <h3>${p.name}</h3>
+            <p>₦${p.price}</p>
+            <small>Category: ${p.category}</small><br>
+            <button onclick="deleteProduct(${p.id})" style="background:red;">Delete</button> 
+          `;
+          productList.appendChild(div);
+        });
+        
+        if (products.length === 0) {
+           productList.innerHTML = "<p>No products yet.</p>";
+        }
+
+      } catch (error) {
+        productList.innerHTML = `<p style="color:red;">Error loading products. Check console for details.</p>`;
+        console.error("Error loading products:", error);
+      }
+    }
+
+    // Delete a product using the Vercel API Route
+    async function deleteProduct(productId) {
+      if (confirm("Are you sure you want to delete this product?")) {
+        try {
+          const response = await fetch("/api/products", {
+            method: "DELETE", // Use DELETE method
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: productId }) // Pass the product ID
+          });
+          
+          if (response.ok) {
+            alert("🗑️ Product deleted successfully!");
+            loadProducts(); // Reload the list
+          } else {
+            const errorData = await response.json();
+            alert(`❌ Deletion failed: ${errorData.error}`);
+          }
+        } catch (error) {
+          alert("❌ An error occurred during deletion.");
+          console.error("Deletion error:", error);
+        }
+      }
+    }
+
+    // Add new product (Image upload + Metadata save)
+    document.getElementById("product-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const name = document.getElementById("name").value;
+      const price = document.getElementById("price").value;
+      const categorySelect = document.getElementById("category").value;
+      const customCategory = document.getElementById("custom-category").value;
+      const category = customCategory || categorySelect;
+
+      const fileInput = document.getElementById("imageFile");
+      const file = fileInput.files[0];
+
+      if (!file) {
+        alert("Please select an image!");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const uploadBtn = e.target.querySelector("button[type='submit']");
+      uploadBtn.textContent = "Uploading...";
+      uploadBtn.disabled = true;
+
+      // --- STEP 1: Upload Image to Vercel Blob (/api/upload) ---
+      let imageUrl;
+      try {
+        const imageRes = await fetch("/api/upload", { 
+          method: "POST", 
+          body: formData 
+        });
+        const imageData = await imageRes.json();
+        
+        if (!imageData.url) {
+          throw new Error("Vercel Blob upload failed.");
+        }
+        imageUrl = imageData.url;
+      } catch (error) {
+        alert("❌ Image upload failed! Check Vercel Blob setup.");
+        uploadBtn.textContent = "Add Product";
+        uploadBtn.disabled = false;
+        return;
+      }
+
+      // --- STEP 2: Save Metadata to Database (/api/products) ---
+      uploadBtn.textContent = "Saving data...";
+
+      const newProduct = { name, price: Number(price), image: imageUrl, category };
+
+      try {
+        const dataRes = await fetch("/api/products", { 
+          method: "POST", 
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newProduct)
+        });
+        
+        if (dataRes.ok) {
+          alert("✅ Product added successfully!");
+          e.target.reset();
+          loadProducts(); // Reload the list
+        } else {
+          const errorData = await dataRes.json();
+          alert(`❌ Failed to add product: ${errorData.error}`);
+        }
+      } catch (error) {
+          alert("❌ An error occurred while saving product data.");
+          console.error("Save product error:", error);
+      } finally {
+        uploadBtn.textContent = "Add Product";
+        uploadBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
