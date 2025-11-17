@@ -1,78 +1,76 @@
-// /api/upload.js
-
 import { put } from '@vercel/blob';
 import formidable from 'formidable';
-import { promises as fs } from 'fs'; // 💡 Use the promises API for async reading
+import fs from 'fs';
+import { extname } from 'path';
 
+// IMPORTANT: This configuration is necessary to tell Next.js/Vercel to disable 
+// its default body parser, allowing 'formidable' to handle the raw file data.
 export const config = {
   api: { bodyParser: false },
 };
 
+// Utility function to generate a unique filename
+// This prevents users from overwriting files with the same name.
+function generateUniqueFilename(originalFilename) {
+  const fileExt = extname(originalFilename);
+  const fileName = originalFilename.replace(fileExt, '');
+  const uniqueId = Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+  return `${fileName}-${uniqueId}${fileExt}`;
+}
+
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (req.method === 'POST') {
+    const form = new formidable.IncomingForm();
 
-  // Wrap formidable parsing in a promise to use await
-  const [fields, files] = await new Promise((resolve, reject) => {
-    const form = formidable({});
-    
-    // Disable file saving to disk if you can use streams, but for reliable file parsing 
-    // in Vercel API routes, using the default disk path and reading it asynchronously is common.
-    // Ensure the default uploadDir works for your Vercel environment.
-
-    form.parse(req, (err, fields, files) => {
+    form.parse(req, async (err, fields, files) => {
       if (err) {
-        return reject(err);
+        console.error('Error parsing form:', err);
+        return res.status(500).json({ error: 'Error parsing form data' });
       }
-      resolve([fields, files]);
+
+      // Check if a file was actually uploaded
+      const file = files.file?.[0];
+      if (!file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+      
+      try {
+        // Read the file data from the temporary path created by formidable
+        const fileData = fs.readFileSync(file.filepath);
+        
+        // Generate a unique filename and prefix it with a directory for organization
+        const uniqueFilename = generateUniqueFilename(file.originalFilename);
+        const blobPath = `product-images/${uniqueFilename}`;
+
+        // Upload the file to Vercel Blob storage
+        // NOTE: This requires the BLOB_READ_WRITE_TOKEN environment variable to be set.
+        const blob = await put(blobPath, fileData, {
+          access: 'public', // Makes the file publicly accessible via its URL
+          contentType: file.mimetype,
+        });
+        
+        // Return the public URL of the uploaded image to the frontend (admin.html)
+        // The frontend will use this URL to save the product to the database.
+        res.status(200).json({ url: blob.url });
+        
+      } catch (uploadError) {
+        console.error('Vercel Blob Upload Failed:', uploadError);
+        // Ensure the error message doesn't reveal sensitive environment details
+        res.status(500).json({ 
+          error: 'Failed to upload image to storage.',
+          details: 'Check BLOB_READ_WRITE_TOKEN and Vercel Blob configuration.'
+        });
+      } finally {
+        // Clean up the temporary file created by formidable
+        try {
+          fs.unlinkSync(file.filepath);
+        } catch (cleanupError) {
+          console.warn('Could not delete temporary file:', cleanupError);
+        }
+      }
     });
-  }).catch((err) => {
-    console.error('Formidable Error:', err);
-    res.status(500).json({ error: 'Error processing file upload.' });
-    return [null, null];
-  });
-
-  if (!files || !files.file) {
-    // Already responded with 500 if parsing failed, otherwise return 400
-    if (!res.headersSent) {
-      res.status(400).json({ error: 'No file received.' });
-    }
-    return;
-  }
-  
-  const file = files.file[0];
-
-  try {
-    // 💡 FIX: Read the file data asynchronously from the temporary location
-    const fileData = await fs.readFile(file.filepath);
-
-    const blob = await put(file.originalFilename, fileData, {
-      access: 'public',
-      addRandomSuffix: true, // Recommended to prevent name collisions
-    });
-
-    // Clean up the temporary file after successful upload
-    await fs.unlink(file.filepath); 
-
-    // Success response
-    res.status(200).json({ url: blob.url });
-
-  } catch (error) {
-    console.error("Vercel Blob Upload Failed:", error);
-
-    // This block is crucial for debugging
-    if (error.message.includes('BLOB_READ_WRITE_TOKEN')) {
-      res.status(500).json({ error: 'Server Configuration Error: BLOB_READ_WRITE_TOKEN is missing or invalid.' });
-    } else {
-      res.status(500).json({ error: 'Failed to upload file to Vercel Blob.' });
-    }
-    
-    // Attempt to clean up the temporary file path even on failure
-    try {
-        await fs.unlink(file.filepath);
-    } catch(cleanupError) {
-        // Ignore cleanup errors
-    }
+  } else {
+    // Respond with Method Not Allowed for non-POST requests
+    res.status(405).json({ error: 'Method not allowed' });
   }
 }
