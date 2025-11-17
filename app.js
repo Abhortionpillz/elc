@@ -9,7 +9,7 @@ const categoryFilter = document.getElementById("category-filter");
 async function fetchProducts() {
   try {
     const response = await fetch("/api/products");
-    if (!response.ok) throw new Error("Failed to fetch products");
+    if (!response) throw new Error("Failed to fetch products");
     // Products now come from Postgres/Vercel API
     const products = await response.json(); 
     return products;
