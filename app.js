@@ -1,7 +1,7 @@
-// app.js (updated)
+// js/app.js
 
 const WHATSAPP_NUMBER = "2347035074453";
-// **CORRECTION**: Changed IDs from "productGrid" and "categoryFilter" to match index.html
+// **CORRECTION**: The IDs now correctly match index.html
 const grid = document.getElementById("product-list"); 
 const categoryFilter = document.getElementById("category-filter"); 
 
@@ -50,7 +50,7 @@ async function renderProducts(filter = "all") {
     const div = document.createElement("div");
     div.className = "product-card";
     div.innerHTML = `
-      <img src="${p.image_url}" alt="${p.name}">
+      <img src="${p.image}" alt="${p.name}"> 
       <h3>${p.name}</h3>
       <p>₦${p.price}</p>
       <p><small>${p.category}</small></p>
@@ -63,6 +63,7 @@ async function renderProducts(filter = "all") {
 function goToWhatsApp(name, price) {
   const phoneNumber = WHATSAPP_NUMBER; 
   const message = encodeURIComponent(`Hi! I'm interested in buying *${name}* for ₦${price}.`);
+  // **CORRECTION**: Now uses WHATSAPP_NUMBER instead of the undefined 'phoneNumber'
   window.open(`https://wa.me/${phoneNumber}?text=${message}`, "_blank"); 
 }
 

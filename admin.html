@@ -62,7 +62,6 @@
 <body>
   <h1>Admin Dashboard</h1>
 
-  <!-- Admin Login -->
   <div id="login-section">
     <h2>Login to Continue</h2>
     <input type="password" id="admin-pass" placeholder="Enter Admin Password">
@@ -70,7 +69,6 @@
     <button onclick="checkPassword()">Login</button>
   </div>
 
-  <!-- Admin Panel -->
   <div id="admin-panel">
     <h2>Add New Product</h2>
     <form id="product-form">
@@ -97,8 +95,8 @@
     <div id="product-list"></div>
   </div>
 
- <script>
-    const ADMIN_PASSWORD = "mySecret123"; 
+  <script>
+    const ADMIN_PASSWORD = "mySecret123"; // change this to your own password
 
     function checkPassword() {
       const entered = document.getElementById("admin-pass").value;
@@ -111,66 +109,60 @@
       }
     }
 
-    // Load all products from the Vercel API Route
+    // Load all products from the API
     async function loadProducts() {
-      const productList = document.getElementById("product-form");
-      productList.innerHTML = "Loading products...";
+      const productList = document.getElementById("product-list");
+      productList.innerHTML = "";
       
       try {
         const response = await fetch("/api/products");
-        if (!response.ok) throw new Error("Failed to fetch products");
-        const products = await response.json(); 
+        if (!response.ok) throw new Error("Failed to fetch products from API");
         
-        productList.innerHTML = ""; 
+        // Products are now fetched from the database via the API
+        const products = await response.json(); 
 
-        products.forEach((p) => {
+        products.forEach(p => {
           const div = document.createElement("div");
           div.className = "product-card";
+          // p.id is used to identify the product for deletion
           div.innerHTML = `
-            <img src="${p.image_url}" alt="${p.name}">
+            <img src="${p.image}" alt="${p.name}">
             <h3>${p.name}</h3>
             <p>₦${p.price}</p>
             <small>Category: ${p.category}</small><br>
-            <button onclick="deleteProduct(${p.id})" style="background:red;">Delete</button> 
+            <button onclick="deleteProduct('${p.id}')" style="background:red;">Delete</button>
           `;
           productList.appendChild(div);
         });
-        
-        if (products.length === 0) {
-           productList.innerHTML = "<p>No products yet.</p>";
-        }
 
       } catch (error) {
-        productList.innerHTML = `<p style="color:red;">Error loading products. Check console for details.</p>`;
         console.error("Error loading products:", error);
+        productList.innerHTML = `<p style="color:red;">Error loading products: ${error.message}</p>`;
       }
     }
 
-    // Delete a product using the Vercel API Route
+    // Delete a product using its ID (requires a DELETE endpoint on /api/products)
     async function deleteProduct(productId) {
       if (confirm("Are you sure you want to delete this product?")) {
         try {
-          const response = await fetch("/api/products", {
-            method: "DELETE", // Use DELETE method
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: productId }) // Pass the product ID
-          });
-          
-          if (response.ok) {
+            // Sends a DELETE request to the API with the product's ID
+            const deleteRes = await fetch("/api/products", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: productId })
+            });
+            
+            if (!deleteRes.ok) throw new Error("Deletion failed on the server.");
+            
             alert("🗑️ Product deleted successfully!");
             loadProducts(); // Reload the list
-          } else {
-            const errorData = await response.json();
-            alert(`❌ Deletion failed: ${errorData.error}`);
-          }
         } catch (error) {
-          alert("❌ An error occurred during deletion.");
-          console.error("Deletion error:", error);
+            alert(`❌ Deletion failed: ${error.message}`);
         }
       }
     }
 
-    // Add new product (Image upload + Metadata save)
+    // Add new product (with image upload to Vercel Blob and product data POST to API)
     document.getElementById("product-form").addEventListener("submit", async (e) => {
       e.preventDefault();
 
@@ -188,56 +180,44 @@
         return;
       }
 
-      const formData = new FormData();
-      formData.append("file", file);
-
       const uploadBtn = e.target.querySelector("button[type='submit']");
       uploadBtn.textContent = "Uploading...";
       uploadBtn.disabled = true;
 
-      // --- STEP 1: Upload Image to Vercel Blob (/api/upload) ---
-      let imageUrl;
-      try {
-        const imageRes = await fetch("/api/upload", { 
-          method: "POST", 
-          body: formData 
-        });
-        const imageData = await imageRes.json();
-        
-        if (!imageData.url) {
-          throw new Error("Vercel Blob upload failed.");
-        }
-        imageUrl = imageData.url;
-      } catch (error) {
-        alert("❌ Image upload failed! Check Vercel Blob setup.");
+      // 1. Upload Image to Vercel Blob API
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      const data = await res.json();
+
+      if (!data.url) {
+        alert("❌ Image upload failed!");
         uploadBtn.textContent = "Add Product";
         uploadBtn.disabled = false;
         return;
       }
 
-      // --- STEP 2: Save Metadata to Database (/api/products) ---
-      uploadBtn.textContent = "Saving data...";
-
-      const newProduct = { name, price: Number(price), image: imageUrl, category };
+      const image = data.url; // This is the public URL of the image
 
       try {
-        const dataRes = await fetch("/api/products", { 
-          method: "POST", 
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(newProduct)
-        });
+        // 2. POST Product Data to /api/products
+        uploadBtn.textContent = "Saving Product...";
         
-        if (dataRes.ok) {
-          alert("✅ Product added successfully!");
-          e.target.reset();
-          loadProducts(); // Reload the list
-        } else {
-          const errorData = await dataRes.json();
-          alert(`❌ Failed to add product: ${errorData.error}`);
-        }
+        const newProduct = { name, price: parseFloat(price), image, category }; // Price as number
+        
+        const productRes = await fetch("/api/products", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newProduct),
+        });
+
+        if (!productRes.ok) throw new Error("Failed to save product to database.");
+
+        alert("✅ Product added successfully!");
+        e.target.reset();
+        loadProducts(); // Reload product list from the server
       } catch (error) {
-          alert("❌ An error occurred while saving product data.");
-          console.error("Save product error:", error);
+         alert(`❌ Product save failed: ${error.message}`);
       } finally {
         uploadBtn.textContent = "Add Product";
         uploadBtn.disabled = false;
