@@ -1,11 +1,9 @@
-// pages/api/upload.js (FIXED VERSION)
+// /api/upload.js
 
-// Use promises API for asynchronous file operations
 import { put } from '@vercel/blob';
 import formidable from 'formidable';
-import { promises as fs } from 'fs'; 
+import { promises as fs } from 'fs'; // 💡 Use the promises API for async reading
 
-// Disable Vercel's default body parser to use formidable
 export const config = {
   api: { bodyParser: false },
 };
@@ -15,46 +13,66 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const form = new formidable.IncomingForm();
+  // Wrap formidable parsing in a promise to use await
+  const [fields, files] = await new Promise((resolve, reject) => {
+    const form = formidable({});
+    
+    // Disable file saving to disk if you can use streams, but for reliable file parsing 
+    // in Vercel API routes, using the default disk path and reading it asynchronously is common.
+    // Ensure the default uploadDir works for your Vercel environment.
+
+    form.parse(req, (err, fields, files) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve([fields, files]);
+    });
+  }).catch((err) => {
+    console.error('Formidable Error:', err);
+    res.status(500).json({ error: 'Error processing file upload.' });
+    return [null, null];
+  });
+
+  if (!files || !files.file) {
+    // Already responded with 500 if parsing failed, otherwise return 400
+    if (!res.headersSent) {
+      res.status(400).json({ error: 'No file received.' });
+    }
+    return;
+  }
+  
+  const file = files.file[0];
 
   try {
-    // 1. Parse the request asynchronously using a Promise
-    const [fields, files] = await new Promise((resolve, reject) => {
-      form.parse(req, (err, fields, files) => {
-        if (err) return reject(err);
-        resolve([fields, files]);
-      });
-    });
-
-    // 2. Extract the file (assuming field name is 'file')
-    const fileArray = files.file; 
-    if (!fileArray || fileArray.length === 0) {
-      return res.status(400).json({ error: 'No file received.' });
-    }
-    const file = fileArray[0];
-
-    // 3. Read the temporary file asynchronously
+    // 💡 FIX: Read the file data asynchronously from the temporary location
     const fileData = await fs.readFile(file.filepath);
 
-    // 4. Upload to Vercel Blob
     const blob = await put(file.originalFilename, fileData, {
       access: 'public',
+      addRandomSuffix: true, // Recommended to prevent name collisions
     });
-    
-    // 5. Clean up the temporary file (important for serverless memory)
+
+    // Clean up the temporary file after successful upload
     await fs.unlink(file.filepath); 
 
-    // 6. Return the public URL
-    return res.status(200).json({ url: blob.url });
-    
-  } catch (err) {
-    console.error("Upload Error:", err);
-    
-    // Catch common errors like the 4.5MB limit
-    if (err.message && err.message.includes('413')) {
-         return res.status(413).json({ error: 'File too large. Vercel Serverless Functions limit is 4.5 MB.' });
+    // Success response
+    res.status(200).json({ url: blob.url });
+
+  } catch (error) {
+    console.error("Vercel Blob Upload Failed:", error);
+
+    // This block is crucial for debugging
+    if (error.message.includes('BLOB_READ_WRITE_TOKEN')) {
+      res.status(500).json({ error: 'Server Configuration Error: BLOB_READ_WRITE_TOKEN is missing or invalid.' });
+    } else {
+      res.status(500).json({ error: 'Failed to upload file to Vercel Blob.' });
     }
     
-    return res.status(500).json({ error: 'Failed to process file upload. Check Vercel logs.', detail: err.message });
+    // Attempt to clean up the temporary file path even on failure
+    try {
+        await fs.unlink(file.filepath);
+    } catch(cleanupError) {
+        // Ignore cleanup errors
+    }
   }
 }
