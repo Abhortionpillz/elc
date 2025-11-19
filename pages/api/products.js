@@ -1,17 +1,14 @@
 
-import { sql } from '@vercel/postgres';
+import { sql } from "@vercel/postgres";
 
 export default async function handler(req, res) {
   try {
-    // ==============================
-    //  GET → Fetch all products
-    // ==============================
-    if (req.method === "GET") {
-      const { rows } = await sql`
-        SELECT * FROM products ORDER BY id DESC;
-      `;
-      return res.status(200).json(rows);
-    }
+    const { rows } = await sql`SELECT * FROM products ORDER BY id DESC`;
+    res.status(200).json(rows);
+  } catch (err) {
+    res.status(500).json({ error: "Database error" });
+  }
+}
 
     // ==============================
     //  POST → Add new product
